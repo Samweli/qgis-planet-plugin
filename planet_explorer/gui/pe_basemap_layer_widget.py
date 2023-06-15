@@ -16,7 +16,7 @@
 """
 import json
 import os
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from qgis.PyQt.QtCore import QByteArray, QRectF, QSize, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QBrush, QColor, QImage, QPainter, QPixmap
@@ -359,8 +359,10 @@ class BasemapLayerWidget(QWidget):
 
     def change_source(self):
         try:
+            layer_has_api_key = 'api_key' in self.layerurl
             has_api_key = PlanetClient.getInstance().has_api_key()
-            self.labelWarning.setVisible(not has_api_key)
+
+            self.labelWarning.setVisible(not has_api_key and not layer_has_api_key)
             self.renderingOptionsWidget.setVisible(has_api_key)
             if len(self.mosaics) > 1:
                 self.labelId.setVisible(has_api_key)
@@ -374,23 +376,43 @@ class BasemapLayerWidget(QWidget):
                 )
                 self.layer.setCustomProperty(PLANET_CURRENT_MOSAIC, name)
             else:
-                tile_url = (
-                    f"{self.layerurl}/"
-                    f"{quote(f'&api_key={PlanetClient.getInstance().api_key()}')}"
-                )
+                if not layer_has_api_key:
+                    tile_url = (
+                        f"{unquote(self.layerurl)}/"
+                        f"{quote(f'&api_key={PlanetClient.getInstance().api_key()}')}"
+                    )
+                else:
+                    tile_url = unquote(self.layerurl)
             proc = self.renderingOptionsWidget.process()
             ramp = self.renderingOptionsWidget.ramp()
             procparam = quote(f"&proc={proc}") if proc != "default" else ""
             rampparam = quote(f"&color={ramp}") if ramp else ""
             tokens = self.layer.source().split("&")
             zoom = []
+            QgsMessageLog.logMessage(
+                f"Tokens are {tokens}",
+                QGIS_LOG_SECTION_NAME,
+                Qgis.Info,
+            )
+            QgsMessageLog.logMessage(
+                f"Self layer url {self.layerurl}",
+                QGIS_LOG_SECTION_NAME,
+                Qgis.Info,
+            )
             for token in tokens:
                 if token.startswith("zmin="):
                     zoom.append(token)
                 if token.startswith("zmax="):
                     zoom.append(token)
             szoom = f"&{'&'.join(zoom)}" if zoom else ""
-            uri = f"type=xyz&url={tile_url}{procparam}{rampparam}{szoom}"
+            url_final = unquote(tile_url)
+
+            uri = f"type=xyz&url={url_final}{procparam}{rampparam}{szoom}"
+            QgsMessageLog.logMessage(
+                f"URI: {uri}",
+                QGIS_LOG_SECTION_NAME,
+                Qgis.Info,
+            )
             provider = self.layer.dataProvider()
             if provider is not None:
                 provider.setDataSourceUri(uri)
